@@ -15,7 +15,7 @@
 │   ├── hooks.server.ts
 │   ├── routes/
 │   │   ├── +layout.svelte / +page.svelte / layout.css
-│   │   ├── models/+page.svelte / settings/+page.svelte
+│   │   ├── models/+page.svelte / settings/+page.svelte / wizard/+page.svelte
 │   │   └── api/                       # SvelteKit server endpoints
 │   │       ├── discovery/+server.ts / topology/+server.ts / peers/ (+ [peerId]/ping)
 │   │       ├── session/ (+status)     # keystone-bound login, recovery-phrase fallback
@@ -24,7 +24,7 @@
 │   │       ├── credentials/huggingface
 │   │       └── system/ (hostname, requirements, update)
 │   └── lib/
-│       ├── server/                    # sessionLock, discovery (mDNS, swarm-ID filtered), topology, conductorIdentity, devSource
+│       ├── server/                    # sessionLock, discovery (mDNS, swarm-ID filtered), topology, conductorIdentity, devSource, wizardBench
 │       ├── adapters/                  # trust (TrustRegistry + persistent trust ledger), keystone, load
 │       ├── components/                # FoundingModal, UpdateApprovalModal, ModelApprovalModal/UploadModal/DropZone,
 │       │   │                          # DiscoveryPanel, PendingTrustPanel, KeystoneLossBanner, SessionLockOverlay,
