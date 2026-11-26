@@ -1,0 +1,96 @@
+/**
+ * 1. Relative path: cockpit/src/lib/server/discovery.ts
+ * 2. Description: Server-side mDNS listener for the SvelteKit BFF, maintaining a reactive map of discovered swarm nodes and injecting them into the core TrustRegistry.
+ * 3. Expects: Network access to the local multicast group and a TrustRegistry instance.
+ * 4. Provides: A strictly typed, singleton discovery manager that automatically registers new peers as "Pending Trust".
+ * 5. SPDX-License-Identifier: MPL-2.0
+ * 6. Copyright (c) 2026 Homahuki GmbH
+ */
+
+import { Bonjour, type Service } from 'bonjour-service';
+import type { TrustRegistry } from 'swisd-network/peer/index.js';
+
+export interface DiscoveredNode {
+  readonly peerId: string;
+  readonly hostname: string;
+  readonly role: string;
+  readonly version: string;
+  readonly host: string;
+  readonly port: number;
+  readonly lastSeen: number;
+}
+
+// Singleton state for the SvelteKit server process
+let bonjourInstance: Bonjour | null = null;
+const discoveredNodes = new Map<string, DiscoveredNode>();
+
+function extractTxtString(txt: unknown, key: string): string {
+  if (typeof txt !== 'object' || txt === null) return 'unknown';
+  const val = (txt as Record<string, unknown>)[key];
+  
+  if (typeof val === 'string') return val;
+  if (val instanceof Buffer) return val.toString('utf-8');
+  
+  // bonjour-service sometimes returns arrays for TXT values
+  if (Array.isArray(val) && val.length > 0) {
+    const first = val[0];
+    if (typeof first === 'string') return first;
+    if (first instanceof Buffer) return first.toString('utf-8');
+  }
+  
+  return 'unknown';
+}
+
+export function startCockpitDiscovery(trustRegistry: TrustRegistry, swarmId?: string): void {
+  if (bonjourInstance) return;
+  
+  bonjourInstance = new Bonjour();
+  console.log('[Cockpit BFF] Starting mDNS discovery for _swisd._tcp.local...');
+
+  bonjourInstance.find({ type: 'swisd' }, (service: Service) => {
+    const peerId = extractTxtString(service.txt, 'peerId');
+    if (peerId === 'unknown') return;
+
+    // Swarm self-recognition: only mix with peers flying our ledger-derived swarm ID.
+    // Peers without a swarm ID (not yet enrolled) still show up as pending ghosts.
+    const peerSwarmId = extractTxtString(service.txt, 'swarmId');
+    if (swarmId && peerSwarmId !== 'unknown' && peerSwarmId !== swarmId) {
+      return;
+    }
+
+    const hostname = extractTxtString(service.txt, 'hostname');
+    
+    // DEBUG: Log the raw TXT record to see exactly what bonjour-service is parsing
+    console.log(`[Cockpit BFF] Discovered ${peerId} | hostname extracted: "${hostname}" | raw txt:`, service.txt);
+
+    // CRITICAL: Register the peer in the core's trust registry as PENDING
+    trustRegistry.discoverPeer(peerId, 'mdns');
+
+    const host = service.referer?.address ?? service.host ?? '127.0.0.1';
+
+    discoveredNodes.set(peerId, {
+      peerId,
+      hostname,
+      role: extractTxtString(service.txt, 'role'),
+      version: extractTxtString(service.txt, 'version'),
+      host,
+      port: service.port,
+      lastSeen: Date.now(),
+    });
+  });
+
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [id, node] of discoveredNodes) {
+      // Extended to 5 minutes (300,000ms) to prevent trusted nodes from vanishing
+      if (now - node.lastSeen > 300000) {
+        discoveredNodes.delete(id);
+      }
+    }
+  }, 60000); // Check every minute
+  cleanupTimer.unref();
+}
+
+export function getDiscoveredNodes(): DiscoveredNode[] {
+  return Array.from(discoveredNodes.values());
+}
